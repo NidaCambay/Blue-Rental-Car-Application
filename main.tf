@@ -6,7 +6,7 @@ resource "aws_instance" "task-1" {
   ami = lookup(var.myami, terraform.workspace)
   instance_type = lookup(var.instance_type, terraform.workspace)
   count = 1
-  key_name = "firstkey"
+  key_name = var.key-pem[terraform.workspace]
   security_groups = [aws_security_group.brc-sg.name]
   tags = {
     Project = "Devops-Project-Server"
