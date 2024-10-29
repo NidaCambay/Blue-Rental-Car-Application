@@ -2,10 +2,10 @@ provider "aws" {
   region = "us-east-1"
 }
 
-resource "aws_instance" "task-1" {
+resource "aws_instance" "task" {
   ami = lookup(var.myami, terraform.workspace)
   instance_type = lookup(var.instance_type, terraform.workspace)
-  key_name = var.key-pem[terraform.workspace]
+  key_name = "firstkey"
   security_groups = [aws_security_group.brc-sg.name]
   tags = {
     Project = "Devops-Project-Server"
@@ -66,6 +66,6 @@ variable "key-pem" {
 }
 
 output "instance_id" {
-  value = aws_instance.task-1.instance_id
+  description = "instance id"
+  value = aws_instance.task.id
 }
-
