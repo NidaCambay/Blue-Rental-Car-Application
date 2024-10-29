@@ -1,0 +1,18 @@
+---
+- name: dev server Apache install
+  hosts: _dev_server
+  become: yes
+
+  tasks:
+    - name: Apache yükleme
+      ansible.builtin.yum:
+        name: httpd
+        state: present
+      when: ansible_os_family == "RedHat" or ansible_distribution == "Amazon" 
+
+    - name: Apache başlatma ve etkinleştirme
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_os_family == "RedHat" or ansible_distribution == "Amazon"

@@ -1,0 +1,36 @@
+---
+- name: Prod Server Git Install
+  hosts: _prod_server
+  become: yes
+
+  tasks:
+    - name: Update all yum packages (Red Hat/CentOS/Amazon Linux)
+      yum:
+        name: "*"
+        state: latest
+      when: ansible_os_family in ["RedHat", "Amazon"]
+
+    - name: Update apt package index (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Git (Debian/Ubuntu)
+      apt:
+        name: git
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Git (Red Hat/CentOS/Amazon Linux)
+      yum:
+        name: git
+        state: present
+      when: ansible_os_family in ["RedHat", "Amazon"]
+
+    - name: Verify Git installation
+      command: git --version
+      register: git_version
+
+    - name: Display Git version
+      debug:
+        msg: "Installed Git version: {{ git_version.stdout }}"
