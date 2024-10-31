@@ -102,7 +102,7 @@ pipeline {
                 sh """
                     export ANSIBLE_HOST_KEY_CHECKING=False
                     export ANSIBLE_PRIVATE_KEY_FILE="/var/lib/jenkins/workspace/${PIPELINE_NAME}/${params.WORKSPACE}-key.pem"
-                    ansible-playbook -i inventory_aws_ec2.yml ${params.WORKSPACE}-playbook.yml -vv
+                    ansible-playbook -i inventory_aws_ec2.yml ${params.WORKSPACE}-playbook.yaml -vv
                 """
             }
         }
