@@ -31,8 +31,8 @@ pipeline {
             steps {
                 script {
                     sh """
-                    aws ec2 create-key-pair --key-name ${params.WORKSPACE}-key --query 'KeyMaterial' --output text --region us-east-1 > ${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
-                    chmod 400 ${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
+                    aws ec2 create-key-pair --key-name ${params.WORKSPACE}-key --query 'KeyMaterial' --output text --region us-east-1 > /var/lib/jenkins/workspace/${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
+                    chmod 400 /var/lib/jenkins/workspace/${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
                     """
                 }
             }
@@ -84,7 +84,7 @@ pipeline {
                 script {
                     sh """
                     aws ec2 delete-key-pair --key-name ${params.WORKSPACE}-key --region us-east-1
-                    rm -f ./${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
+                    rm -f /var/lib/jenkins/workspace/${PIPELINE_NAME}/${params.WORKSPACE}-key.pem
                     """
                 }
             }
@@ -101,7 +101,7 @@ pipeline {
                 sh 'ansible-inventory -i inventory_aws_ec2.yml --graph'
                 sh """
                     export ANSIBLE_HOST_KEY_CHECKING=False
-                    export ANSIBLE_PRIVATE_KEY_FILE="${PIPELINE_NAME}/${params.WORKSPACE}-key.pem"
+                    export ANSIBLE_PRIVATE_KEY_FILE="/var/lib/jenkins/workspace/${PIPELINE_NAME}/${params.WORKSPACE}-key.pem"
                     ansible-playbook -i inventory_aws_ec2.yml ${params.WORKSPACE}-playbook.yml -vv
                 """
             }
