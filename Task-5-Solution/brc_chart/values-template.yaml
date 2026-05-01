@@ -1,0 +1,4 @@
+IMAGE_TAG_BE: "${IMAGE_TAG_BE}"
+IMAGE_TAG_DB: "${IMAGE_TAG_DB}"
+IMAGE_TAG_FE: "${IMAGE_TAG_FE}"
+DNS_NAME: "carrental.yagmurana.info"

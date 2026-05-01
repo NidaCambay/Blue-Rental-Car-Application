@@ -1,0 +1,85 @@
+- name: k3s install.
+  hosts: _prod_server
+  become: true
+  remote_user: ubuntu
+  vars: 
+    aws_region: us-east-1
+    aws_account_id: ""
+    ecr_registry: "{{ aws_account_id }}.dkr.ecr.{{ aws_region }}.amazonaws.com"
+  tasks:
+    - name: update all packages
+      ansible.builtin.apt:
+        name: '*'
+        state: latest 
+
+    - name: install unzip
+      ansible.builtin.apt:
+        name: unzip
+        state: latest 
+
+    - name: install docker
+      shell: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+
+    - name: Add user ubuntu to docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: yes  
+        
+    - name: Start Docker service
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes 
+
+    - name: AWS CLI İnstall
+      shell: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+
+    - name: Getting AWS account id
+      shell: aws sts get-caller-identity --query 'Account' --output text
+      register: account_id
+
+    - name: Assigning AWS account id to variable
+      set_fact:
+        aws_account_id: "{{ account_id.stdout }}"
+
+    - name: K3S İnstall
+      shell: |
+          curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=" --tls-san {{ JENKINS_IP }} --docker " sh -
+          chmod 644 /etc/rancher/k3s/k3s.yaml
+ 
+    - name: Kubeconfig Copy
+      fetch:
+        src: "/etc/rancher/k3s/k3s.yaml"
+        dest: "/var/lib/jenkins/kubeconfig.yaml"
+        flat: yes
+   
+    - name: log in to AWS ubuntu
+      ansible.builtin.shell: |
+        export PATH=/usr/local/bin:$PATH
+        source ~/.bash_profile
+        aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry }}   
+
+    - name: Create .docker folder
+      file:
+        path: /home/ubuntu/.docker
+        state: directory
+        mode: '0755'
+
+    - name: copy the docker config file
+      copy: 
+        src: /var/lib/jenkins/.docker/config.json
+        dest: /home/ubuntu/.docker/config.json
+
+    - name:  Create Kubernetes Object
+      shell: |
+          kubectl get ns brc || kubectl create ns brc
+          kubectl delete secret regcred -n brc || true
+          kubectl create secret generic regcred -n brc \
+            --from-file=.dockerconfigjson=/home/ubuntu/.docker/config.json \
+            --type=kubernetes.io/dockerconfigjson

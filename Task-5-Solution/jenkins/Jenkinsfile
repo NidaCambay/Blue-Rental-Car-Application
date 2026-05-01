@@ -1,0 +1,150 @@
+pipeline {
+    agent any
+    environment {
+        AWS_REGION= "us-east-1"
+        APP_REPO_NAME="techpro-brc"
+        APP_NAME="car-rental"
+        AWS_ACCOUNT_ID=sh(script: 'export PATH="$PATH:/usr/local/bin" && aws sts get-caller-identity --query Account --output text', returnStdout: true).trim()
+        ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    }
+
+    stages {      
+        stage('Prepare Tags for Docker Images') {
+            steps {
+                echo 'Preparing Tags for Docker Images'
+                script {
+                    env.IMAGE_TAG_FE = "${ECR_REGISTRY}/${APP_REPO_NAME}:frontend-v${BUILD_NUMBER}"
+                    env.IMAGE_TAG_BE = "${ECR_REGISTRY}/${APP_REPO_NAME}:backend-v${BUILD_NUMBER}"
+                    env.IMAGE_TAG_DB = "${ECR_REGISTRY}/${APP_REPO_NAME}:postgre-v${BUILD_NUMBER}"
+                }
+            }
+        }
+        stage('Build App Docker Images') {
+            steps {
+                echo 'Building App Dev Images'
+                sh """
+                    docker build --force-rm -t "${IMAGE_TAG_FE}" "${WORKSPACE}/bluerentalcars-frontend"
+                    docker build --force-rm -t "${IMAGE_TAG_BE}" "${WORKSPACE}/bluerentalcars-backend"
+                    docker build --force-rm -t "${IMAGE_TAG_DB}" "${WORKSPACE}/postgresql"
+                    docker image ls
+                """
+            }
+        }
+        stage('Create ECR Repository') {
+            steps {
+                echo "Creating ECR Repository ${APP_REPO_NAME}"
+                sh """
+                    aws ecr describe-repositories --repository-names "${APP_REPO_NAME}" --region ${AWS_REGION} || \
+                    aws ecr create-repository --repository-name "${APP_REPO_NAME}" --region ${AWS_REGION}
+                """
+            }
+        }
+        stage('Push Images to ECR Repo') {
+            steps {
+                echo "Pushing ${APP_NAME} App Images to ECR Repo"
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker push "${IMAGE_TAG_FE}"
+                    docker push "${IMAGE_TAG_BE}"
+                    docker push "${IMAGE_TAG_DB}"
+                """
+            }
+        }
+        stage('Create K8s Objects') {
+            steps {
+                echo 'Creating Kubernetes Objects'
+                sh """ 
+                kubectl get ns brc || kubectl create ns brc
+                kubectl delete secret regcred -n brc || echo "there is no regcred secret in brc namespace"
+                kubectl create secret generic regcred -n brc \
+                  --from-file=.dockerconfigjson=/var/lib/jenkins/.docker/config.json \
+                  --type=kubernetes.io/dockerconfigjson
+                   """
+
+            }
+        }  
+
+        stage('Nginx Ingress Controller Install') {
+            steps {
+                echo 'Ingress Install'
+                sh """ 
+                    helm upgrade --install ingress-nginx ingress-nginx \
+                      --repo https://kubernetes.github.io/ingress-nginx \
+                      --namespace ingress-nginx --create-namespace
+                   """
+
+            }
+        }
+        
+        stage('Wait Nginx Ingress Controller Install') {
+            steps {
+                echo 'Ingress Install'
+                sh '. ./Task-5-Solution/wait.sh'
+
+            }
+        }   
+        stage('Deploy Application on EKS') {
+            steps {
+                echo 'Blue Rental Cars Deploying'
+                sh """
+                  envsubst < Task-5-Solution/brc_chart/values-template.yaml > Task-5-Solution/brc_chart/values.yaml
+                  sed -i s/HELM_VERSION/${BUILD_NUMBER}/ Task-5-Solution/brc_chart/Chart.yaml
+                  helm plugin list | grep -q "s3" || helm plugin install https://github.com/hypnoglow/helm-s3.git
+                  aws s3 ls s3://brc-nazli/stable/myapp/index.yaml || helm s3 init s3://brc-nazli/stable/myapp
+                  helm repo add brc-app s3://brc-nazli/stable/myapp/ || echo "repository name already exists"
+                  helm repo update
+                  helm package Task-5-Solution/brc_chart
+                  helm s3 push --force brc_chart-${BUILD_NUMBER}.tgz brc-app
+                  helm repo update
+                  helm upgrade --install \
+                    brc-app-release brc-app/brc_chart --version ${BUILD_NUMBER} \
+                    --namespace brc
+                """
+             }
+        }
+
+        stage('Deploy Monitoring tools on EKS') {
+            steps {
+                echo 'Monitoring tools deploying'
+                sh """
+                  kubectl get ns monitoring || kubectl create ns monitoring
+                  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+                  helm repo update
+                  helm upgrade --install kubeprostack --namespace monitoring prometheus-community/kube-prometheus-stack
+                  kubectl apply -f Task-5-Solution/prometheus-grafana/ingress.yaml
+                """
+             }
+        }
+        stage('Destroy the infrastructure') {
+            steps {
+                timeout(time: 5, unit: 'DAYS') {
+                    input message: 'Approve terminate'
+                }
+                script {
+                    // Delete application.
+                    sh 'helm uninstall brc-app-release -n brc'
+                    // Delete the Ingress controller's.
+                    sh 'helm uninstall ingress-nginx -n ingress-nginx'
+                    // Delete the Monitoring tools.
+                    sh 'helm uninstall kubeprostack -n monitoring'
+                    // Prune all local Docker images
+                    sh 'docker image prune -af'
+                    // Delete the ECR repository (this will remove all images in the repository)
+                    sh "aws ecr delete-repository --repository-name ${APP_REPO_NAME} --region ${AWS_REGION} --force"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Deleting all local images'
+            sh 'docker image prune -af'
+        }
+        failure {
+             echo 'Delete the Image Repository on ECR due to the Failure'
+                sh "aws ecr delete-repository --repository-name ${APP_REPO_NAME} --region ${AWS_REGION} --force"
+        }
+    }
+
+}
